@@ -1,8 +1,26 @@
 <?php
+/**
+ * Copyright (c) 2020. Sébastien Rinsoz (rinsoz.org)
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
-//header("content-type: application/rss+xml; charset=UTF-8");
-header('Content-Type: text/xml');
 
+// config section
+define("CHANNEL_JSON", "channel.json");
+define("CACHEFILE", "cache.xml");
+
+
+// misc definitions
 define('NC_CONTENT', "http://purl.org/rss/1.0/modules/content/");
 define('NC_WFW', "http://wellformedweb.org/CommentAPI/");
 define('NC_DC', "http://purl.org/dc/elements/1.1/");
@@ -36,12 +54,19 @@ function format_date($timestamp = null)
 
 }
 
+function report_error(string $message)
+{
+    $errmessage = date('c') . ":" . rtrim($message) . "\n";
+    file_put_contents("error.txt", $errmessage, FILE_APPEND);
+    die($message);
+
+}
+
 class PodcastItem
 {
     private $mp3;
     private $title;
     private $date;
-    private $comment;
     private $author;
     private $season;
     private $duration;
@@ -77,14 +102,6 @@ class PodcastItem
     public function setDate($date): void
     {
         $this->date = $date;
-    }
-
-    /**
-     * @param string $comment
-     */
-    public function setComment($comment): void
-    {
-        $this->comment = $comment;
     }
 
     /**
@@ -128,6 +145,14 @@ class PodcastItem
         $this->summary = $summary;
     }
 
+    /**
+     * @param mixed $subtitle
+     */
+    public function setSubtitle($subtitle): void
+    {
+        $this->subtitle = $subtitle;
+    }
+
 
     /**
      * @param SimpleXMLElement $channel
@@ -149,7 +174,7 @@ class PodcastItem
         $enclosure->addAttribute("length", $size);
         $enclosure->addAttribute("type", "audio/mpeg");
 
-        if ($this->subtitle!='') {
+        if ($this->subtitle != '') {
             $item->addChild('itunes:subtitle', $this->subtitle, NC_ITUNES);
         }
         $item->addChild('itunes:summary', $this->summary, NC_ITUNES);
@@ -178,7 +203,6 @@ class Podcast
     private $owner_name;
     private $owner_email;
     private $copyright;
-    private $last_build;
     /**
      * @var array
      */
@@ -220,13 +244,12 @@ class Podcast
 
     /**
      * @param string $subtitle
-     * @throws Exception
      */
     public function setSubtitle(string $subtitle): void
     {
         $strlen = strlen($subtitle);
         if ($strlen > 255) {
-            $this->report_error("Itunes subtitle is too long ($strlen > 255)");
+            report_error("Itunes subtitle is too long ($strlen > 255)");
             $this->subtitle = substr($subtitle, 0, 255);
             return;
         }
@@ -261,7 +284,7 @@ class Podcast
     public function setImg(string $filename)
     {
         if (!file_exists($filename)) {
-            $this->report_error("Podcast image {$filename} does not exist");
+            report_error("Podcast image {$filename} does not exist");
             return;
         }
         $this->img = $filename;
@@ -353,15 +376,12 @@ class Podcast
         //sa$channel->addChild('sy:updateFrequency', 1, "sy");
 
         //add podcast image
-        /*
         $podcast_img_xml = $channel->addChild('image');
         $podcast_img_xml->addChild('url', relative_url($this->img));
         $podcast_img_xml->addChild('title', $this->title);
         $podcast_img_xml->addChild('link', $this->site);
         $podcast_img_xml->addChild('width', $this->img_width);
         $podcast_img_xml->addChild('height', $this->img_height);
-        */
-
 
         //itunes stuff
         $channel->addChild('itunes:summary', $this->descr, NC_ITUNES);
@@ -372,7 +392,9 @@ class Podcast
 
         $owner = $channel->addChild('itunes:owner', null, NC_ITUNES);
         $owner->addChild('itunes:name', $this->owner_name, NC_ITUNES);
-        $owner->addChild('itunes:email', $this->owner_email, NC_ITUNES);
+        if ($this->owner_email!='') {
+            $owner->addChild('itunes:email', $this->owner_email, NC_ITUNES);
+        }
 
         $channel->addChild('managingEditor', "$this->owner_email ({$this->owner_name})");
         $channel->addChild('copyright', $this->copyright);
@@ -400,10 +422,6 @@ class Podcast
         return $this->owner_name;
     }
 
-    private function report_error(string $message)
-    {
-        throw new Exception($message);
-    }
 
     public function setImgBig(string $string)
     {
@@ -415,64 +433,68 @@ class Podcast
 
 function rebuild_podcast()
 {
+    $json_raw = file_get_contents(CHANNEL_JSON);
+    $json = json_decode($json_raw, true);
+    // todo validate json file
+
     $podcast = new Podcast();
-
-    $podcast->setTitle("SDS Podcasts");
-    $podcast->setSubtitle("Podcasts de la Faculté des Sciences de la Société de l'Université de Genève");
-    $podcast->setSite("https://www.unige.ch/sciences-societe/servicecollect/podcast/");
-    $podcast->setAuthor("Faculté des Sciences de la Société, UNIGE");
-    $podcast->setDescr("Les podcasts de la Faculté des Sciences de la Société proposent des entretiens avec nos chercheuses et chercheurs sur des thématiques de sciences sociales, des éclairages et des idées pour faire réfléchir au monde dans lequel nous vivons.");
-    $podcast->setImg("sds_podcast_32.jpg");
-    $podcast->setImgBig("sds_podcast.jpg");
+    $podcast->setTitle($json['title']);
+    $podcast->setSubtitle($json['subtitle']);
+    $podcast->setSite($json['website']);
+    $podcast->setAuthor($json['author']);
+    $podcast->setDescr($json['description']);
+    $podcast->setImg($json['image_small']);
+    $podcast->setImgBig($json['image_itunes']);
     $podcast->setXmlUrl("https://{$_SERVER['HTTP_HOST']}{$_SERVER['REQUEST_URI']}");
-    $podcast->setLang("fr-FR");
-    $podcast->setOwnerEmail("elearning-sds@unige.ch");
-    $podcast->setOwnerName("Faculté des Sciences de la Société, UNIGE");
-    $podcast->setCopyright("&#xA9; Faculté des Sciences de la Société, UNIGE");
+    $podcast->setLang($json['language']);
+    $podcast->setOwnerEmail($json['owner_email']);
+    $podcast->setOwnerName($json['owner_name']);
+    $podcast->setCopyright($json['copyright']);
 
 
-    $episode = new PodcastItem();
-    $episode->setTitle("Inscription de l'alpinisme au patrimoine immatériel de l'Unesco, avec Prof. Bernard Debarbieux");
-    $episode->setAuthor($podcast->getOwnerName());
-    $episode->setDate(strtotime("10 Feb 2020"));
-    $episode->setMp3("episodes/2020_02_10/alpinisme_unesco.mp3");
-    $episode->setSummary(
-        "L'alpinisme vient d'être inscrit au patrimoine culturel immatériel de l'humanité. Qui a porté ce projet ? Qui a-t-il fallu convaincre ? Avec quels arguments, et quels concepts ? De son côté, le massif du Mont-Blanc attend toujours aux portes du patrimoine mondial une inscription dont il est question depuis plus de vingt-cinq ans.");
-    $episode->setDuration("00:37:35");
-    $episode->setImage("episodes/2020_02_10/unnamed.jpg");
-    $podcast->addEpisode($episode);
+    $episodes_dir = "episodes";
+    $scandir = scandir($episodes_dir);
+    foreach ($scandir as $dir) {
+        $basepath = $episodes_dir . "/" . $dir . "/";
+        $json_file = $basepath . "info.json";
+        if (!file_exists($json_file)) {
+            continue;
+        }
+        $json_raw = file_get_contents($json_file);
+        $json_ep = json_decode($json_raw, true);
+        $episode = new PodcastItem();
+        $episode->setTitle($json_ep['title']);
+        $episode->setSubtitle($json_ep['subtitle']);
+        $episode->setSummary($json_ep['description']);
+        $author = $json_ep['author'];
+        if ($author == '') {
+            $episode->setAuthor($json['author']);
+        } else {
+            $episode->setAuthor($author);
+        }
+        $episode->setDate(strtotime($json_ep['mp3']));
+        $episode->setDuration($json_ep['pubdate']);
+        $episode->setMp3($basepath . $json_ep['mp3']);
+        $episode->setDuration($json_ep['duration']);
+        $episode->setImage($basepath . $json_ep['image']);
+        $podcast->addEpisode($episode);
 
-    $episode = new PodcastItem();
-    $episode->setTitle("Les mouvements sociaux, avec Prof. Marco Giugni");
-    $episode->setAuthor($podcast->getOwnerName());
-    $episode->setDate(strtotime("27 Jan 2020"));
-    $episode->setMp3("episodes/2020_01_27/mouvements_sociaux.mp3");
-    $episode->setSummary(
-        "Marco Giugni aborde le concept de mouvement social et questionne les facteurs et structures de mobilisation, et les formes d’actions. C’est l’ensemble des caractéristiques d’un régime ou de ses institutions qui facilitent ou entravent l’action collective des citoyens et citoyennes. Une des caractéristiques les plus importantes qui permet la mobilisation sociale est le degré de concentration du pouvoir étatique et la capacité de ce même État à accepter les changements qui émanent des contre-pouvoirs, notamment les mouvements sociaux.");
-    $episode->setDuration("00:36:35");
-    $episode->setImage("episodes/2020_01_27/24rtg245g2.jpg");
-    $podcast->addEpisode($episode);
-    //fixme save the output for the cache
+    }
     return $podcast->getOutput();
 }
 
-$res = rebuild_podcast();
-/*
-$fixedrss="<rss version=\"2.0\"
-     xmlns:content=\"http://purl.org/rss/1.0/modules/content/\"
-     xmlns:wfw=\"http://wellformedweb.org/CommentAPI/\"
-     xmlns:dc=\"http://purl.org/dc/elements/1.1/\"
-     xmlns:atom=\"http://www.w3.org/2005/Atom\"
-     xmlns:sy=\"http://purl.org/rss/1.0/modules/syndication/\"
-     xmlns:slash=\"http://purl.org/rss/1.0/modules/slash/\"
-     xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\"
-     xmlns:rawvoice=\"http://www.rawvoice.com/rawvoiceRssModule/\"
-     xmlns:googleplay=\"http://www.google.com/schemas/play-podcasts/1.0\"
-     xmlns:georss=\"http://www.georss.org/georss\"
-     xmlns:geo=\"http://www.w3.org/2003/01/geo/wgs84_pos#\"
->";
-$res = str_replace('<rss>', $fixedrss, $res);
-*/
+
+if (!file_exists(CHANNEL_JSON)) {
+    die("No channel.json file found");
+}
+//header("content-type: application/rss+xml; charset=UTF-8");
+header('Content-Type: text/xml');
+if (isset($_GET['force_refresh']) || !file_exists(CACHEFILE) || (filemtime(CACHEFILE) < filemtime(CHANNEL_JSON))) {
+    $res = rebuild_podcast();
+    file_put_contents(CACHEFILE, $res);
+} else {
+    $res = file_get_contents(CACHEFILE);
+}
 print($res);
 
 

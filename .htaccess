@@ -1,0 +1,3 @@
+Options +FollowSymLinks
+RewriteEngine On
+RewriteRule podcast PodcastPHP.php [R=301,L]
