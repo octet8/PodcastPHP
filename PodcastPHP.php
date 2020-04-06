@@ -73,6 +73,15 @@ class PodcastItem
     private $summary;
     private $image;
     private $subtitle;
+    private $link;
+
+    /**
+     * @param mixed $link
+     */
+    public function setLink($link): void
+    {
+        $this->link = $link;
+    }
 
     public function __construct()
     {
@@ -162,11 +171,10 @@ class PodcastItem
         $relative_url = relative_url($this->mp3);
         $item = $channel->addChild('item');
         $item->addChild('title', $this->title);
-        //$item->addChild('link', "fixme");
         $item->addChild('pubDate', format_date($this->date));
-
         $item->addChild('guid', "$relative_url");
 
+        $item->addChild('link', $this->link);
         $item->addChild('description', $this->summary);
         $enclosure = $item->addChild('enclosure');
         $enclosure->addAttribute("url", $relative_url);
@@ -187,6 +195,26 @@ class PodcastItem
 
     }
 
+    public function getDate()
+    {
+        return $this->date;
+    }
+
+}
+
+/**
+ * @param PodcastItem $obja
+ * @param PodcastItem $objb
+ * @return int
+ */
+function cmp($obja, $objb)
+{
+    $a = $obja->getDate();
+    $b = $objb->getDate();
+    if ($a == $b) {
+        return 0;
+    }
+    return ($a > $b) ? -1 : 1;
 }
 
 
@@ -217,6 +245,7 @@ class Podcast
      * @var string
      */
     private $img_big;
+    private $category;
 
     public function __construct()
     {
@@ -343,6 +372,8 @@ class Podcast
     public function getOutput()
     {
 
+        uasort($this->episodes, 'cmp');
+
         $rootrsss = '<rss version="2.0" ' .
             'xmlns:content="' . NC_CONTENT . '" ' .
             'xmlns:wfw="' . NC_WFW . '" ' .
@@ -389,25 +420,22 @@ class Podcast
         $channel->addChild('itunes:explicit', "clean", NC_ITUNES);
         $img = $channel->addChild('itunes:image', null, NC_ITUNES);
         $img->addAttribute('href', relative_url($this->img_big));
-
         $owner = $channel->addChild('itunes:owner', null, NC_ITUNES);
         $owner->addChild('itunes:name', $this->owner_name, NC_ITUNES);
-        if ($this->owner_email!='') {
+        if ($this->owner_email != '') {
             $owner->addChild('itunes:email', $this->owner_email, NC_ITUNES);
         }
-
         $channel->addChild('managingEditor', "$this->owner_email ({$this->owner_name})");
         $channel->addChild('copyright', $this->copyright);
-
         $channel->addChild('itunes:subtitle', $this->subtitle, NC_ITUNES);
-
-        //fixme hardcoded category
-        $categ = $channel->addChild('itunes:category', null, NC_ITUNES);
-        $categ->addAttribute('text', "Technology");
-        //$subcateg= $categ->addChild('itunes:category', null, NC_ITUNES);
-        //$subcateg->addAttribute('text', "Technology");
-
-
+        $categ = explode('|', $this->category);
+        $main_categ = $channel->addChild('itunes:category', null, NC_ITUNES);
+        $main_categ->addAttribute('text', trim($categ[0]));
+        if (sizeof($categ) > 1) {
+            $sub_categ = $main_categ->addChild('itunes:category', null, NC_ITUNES);
+            $sub_categ->addAttribute('text', trim($categ[1]));
+        }
+        /** @var PodcastItem $item */
         foreach ($this->episodes as $item) {
             $item->toXML($channel);
         }
@@ -426,6 +454,11 @@ class Podcast
     public function setImgBig(string $string)
     {
         $this->img_big = $string;
+    }
+
+    public function setCategory($category)
+    {
+        $this->category = $category;
     }
 
 
@@ -450,6 +483,7 @@ function rebuild_podcast()
     $podcast->setOwnerEmail($json['owner_email']);
     $podcast->setOwnerName($json['owner_name']);
     $podcast->setCopyright($json['copyright']);
+    $podcast->setCategory($json['category']);
 
 
     $episodes_dir = "episodes";
@@ -472,14 +506,20 @@ function rebuild_podcast()
         } else {
             $episode->setAuthor($author);
         }
-        $episode->setDate(strtotime($json_ep['mp3']));
-        $episode->setDuration($json_ep['pubdate']);
+        $link = $json_ep['link'];
+        if ($link == '') {
+            $episode->setLink($json['website']);
+        } else {
+            $episode->setLink($link);
+        }
+        $episode->setDate(strtotime($json_ep['pubdate']));
         $episode->setMp3($basepath . $json_ep['mp3']);
         $episode->setDuration($json_ep['duration']);
         $episode->setImage($basepath . $json_ep['image']);
         $podcast->addEpisode($episode);
 
     }
+
     return $podcast->getOutput();
 }
 
